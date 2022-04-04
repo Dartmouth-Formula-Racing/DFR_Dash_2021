@@ -8,6 +8,7 @@ This project is designed to run on the [SparkFun AST-CAN485](https://www.sparkfu
 ## Dependencies
 
 [QwiicSerLCD](https://github.com/fourstix/QwiicSerLCD) - Display communication
+
 [AST Can Library](https://github.com/Atlantis-Specialist-Technologies/AST_CAN_Arduino_Library) - CAN communication
 
 #### Building/Flashing
