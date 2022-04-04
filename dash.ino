@@ -1,16 +1,4 @@
 /*
-CAN drive states:
-Default - 0
-00000000 - Neutral (Used to be drive??)
-10000000 - Drive
-20000000 - Reverse
-
-State priority:
-1. Neutral
-2. Drive
-3. Reverse
-Will send request for neutral if all 3 buttons are pressed
-
 Debouncing timer array:
 0 - Drive button
 1 - Neutral button
