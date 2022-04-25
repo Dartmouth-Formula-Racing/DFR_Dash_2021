@@ -1,20 +1,22 @@
 #ifndef CAR_STATE_H
 #define CAR_STATE_H
 
-enum drive_state {DRIVE, NEUTRAL, REVERSE};
+typedef enum cvc_state_e {PRECHARGE, DRIVE, NEUTRAL, REVERSE} cvc_state;
+typedef enum cvc_fault_e {CVC_OK, CVC_WARNING, CVC_RST_FAULT, CVC_HARD_FAULT} cvc_fault;
 
 class Car_Data {
 public:
-    float voltageLow = (float)99.9;   // HV battery voltage
-    float voltageHigh = (float)009.9;  // LV battery voltage
-    float current = (float)999.9;
+    float voltageLow = (float)0.0;   // HV battery voltage
+    float voltageHigh = (float)0.0;  // LV battery voltage
+    float current = (float)0.0;
 
-    int speed = 999;
-    int tempBat = 999;
-    int tempMotor = 999;
-    int tempDriver = 999;
+    int speed = 0;
+    int tempBat = 0;
+    int tempMotor = 0;
+    int tempDriver = 0;
 
-    enum drive_state driveState = NEUTRAL; // Drive state of CVC
+    cvc_state cvcState = NEUTRAL; // State of CVC
+    cvc_fault cvcFault = CVC_OK;
 
     char* error; // Reason for error
     int maxError;

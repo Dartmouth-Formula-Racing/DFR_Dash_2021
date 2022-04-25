@@ -256,21 +256,6 @@ void loop() {
 			#endif
 			can_cmd(&txMsg);
 		} else {
-			/*
-			CAN data receive format (big-endian):
-
-			Packet 1:
-			[0]
-			Bits 0-3 -> Drive state
-			[1,2,3,4]
-			Bits 8-39 -> 32 bit accumulator voltage
-			[5,6,7]
-			Bits 40-63 -> Some sort current?
-
-			Packet 2:
-			[]
-
-			*/
 			CANMode = RX;
 			clearBuffer(rxBuffer);
 			// Set up RX CAN packet.
@@ -334,6 +319,8 @@ void loop() {
 				#endif
 				CANStep2 = true;
 				CANErrors = 0;
+				// Interpreting CVC data
+				parseRx(&rxMsg);
 			}
 			// Attempt to recover if CAN refuses command
 			if (can_cmd(&rxMsg) == CAN_CMD_REFUSED) {
@@ -371,9 +358,6 @@ void loop() {
 			#endif
 		}
 	}
-
-	// Interpreting CVC data
-	// parseRx(&rxMsg);
 	// ========================================== CHECKING FOR ERRORS/FAULTS =========================================
 	fault = (CANFault); // (CANFault || SomeOtherFault || AnotherFault)
 	// warning = ();
@@ -575,10 +559,40 @@ void generateDisplay(char** dashDisplays, char* outString, uint32_t size, uint8_
 * @param rxMsg an st_cmd_t* structure.
 * @return none.
 */
+/*
+CAN data receive format (big-endian):
+
+Packet 1:
+ID			0x7FE
+[0] 		Bits 0-3 -> CVC state
+[1]			Bits 8-11 -> CVC fault
+[2,3,4,5] 	Bits 16-47 -> 32 bit accumulator voltage
+[6,7] 		Bits 48-63 -> 16 bit accumulator current
+
+Packet 2:
+ID			0x7FF
+[]
+
+*/
 void parseRx(st_cmd_t* rxMsg) {
 	#if (DEBUG > 0)
 	SerialPrintCAN(rxMsg);
 	#endif
+	uint32_t id;
+	if (rxMsg->ctrl.ide > 0) {
+		id = rxMsg->id.ext;
+	} else {
+		id = rxMsg->id.std;
+	}
+
+	if (id == 0x7FE) {
+		carData.cvcState = (cvc_state)rxMsg->pt_data[0];
+		carData.cvcFault = (cvc_fault)rxMsg->pt_data[1];
+		carData.voltageHigh = ((float)(rxMsg->pt_data[2] << 24 | rxMsg->pt_data[3] << 16 | rxMsg->pt_data[4] << 8 | rxMsg->pt_data[5]))/100.0;
+		carData.current = ((float)(rxMsg->pt_data[6] << 8 | rxMsg->pt_data[7]))/100.0;
+	} else if (id == 0x7FF) {
+
+	}
 }
 
 
