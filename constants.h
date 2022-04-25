@@ -12,6 +12,7 @@ const uint16_t dashLoopTime = 0;        // (milliseconds) | Defines the minimum 
 const uint8_t emptyPacket[8] = {0,0,0,0,0,0,0,0};
 const uint16_t txCooldown = 50;			// (milliseconds) | Defines the minimum time between CAN transmissions
 const uint16_t displayCooldown = 200;	// (milliseconds) | Defines the minimum time between display updates
+const uint32_t CANErrorThreshold = 5;   // Throw fault after 5 consecutive errors
 
 
 // Button definitions

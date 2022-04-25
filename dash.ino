@@ -1,24 +1,25 @@
-/*
-Debouncing timer array:
-0 - Drive button
-1 - Neutral button
-2 - Reverse button
-3 - toggle 1 (idk what these are)
-4 - toggle 2
-
-CAN data transmit format:
-[drivebutton (0/1), neutralbutton (0/1), reversebutton (0/1), toggle1 (0/1/2), toggle2 (0/1/2)]
-*/
-
-// Enable debugging over serial
-#define DEBUG 0
-#define DEBUG_BAUD 1000000
+/**
+ * @file
+ * @author  Andrei Gerashchenko <Andrei.Gerashchenko.UG@dartmouth.edu>
+ * @version 0.6
+ *
+ * 
+ *
+ * @section DESCRIPTION
+ *
+ * This file contains code for the dashboard of the 2022 DFR car.
+ */
 
 #include <ASTCanLib.h>
 #include <SerLCD.h>
 #include "constants.h"
 #include "car_state.h"
 #include "dash_screens.h"
+
+// Enable debugging over serial
+#define DEBUG 3
+#define DEBUG_BAUD 1000000
+#define FORCE_ERROR_VIEW 0
 
 enum CAN_MODE {TX, RX};
 
@@ -34,12 +35,10 @@ uint8_t toggleByte = 0;
 
 st_cmd_t txMsg;
 st_cmd_t rxMsg;
-st_cmd_t abortMsg;
 
 uint8_t sendData[8] = {0,0,0,0,0,0,0,0};
 uint8_t txBuffer[8] = {};
 uint8_t rxBuffer[8] = {};
-uint8_t abortBuffer[8] = {};
 uint32_t lastTx = 0;
 uint32_t lastDisplay = 0;
 uint32_t lastLoop = 0;
@@ -49,15 +48,28 @@ bool CANStep1 = false;
 bool CANStep2 = false;
 bool CANBusy = false;
 bool CANFault = false;
+uint32_t CANErrors = 0;
 enum CAN_MODE CANMode;
 
 SerLCD lcd;
+uint8_t lcd_r = 0;
+uint8_t lcd_g = 0;
+uint8_t lcd_b = 0;
 
 bool warning = false;
 bool fault = false;
 char warningReason[LCDCols * LCDRows - 9];
 char faultReason[LCDCols * LCDRows - 7];
 
+
+/*
+Debouncing timer array:
+0 - Drive button
+1 - Neutral button
+2 - Reverse button
+3 - toggle 1 (idk what these are)
+4 - toggle 2
+*/
 uint32_t debounceTimers[5] = {0,0,0,0,0};
 bool debounceActive[5] = {false,false,false,false,false};
 
@@ -69,10 +81,16 @@ void dashStartup(SerLCD lcd, bool skip, uint8_t LCDCols);
 void generateDisplay(char** dashDisplays, char* outString, uint32_t size, uint8_t view, Car_Data carData);
 void updateDisplay(SerLCD lcd, char** dashDisplays, uint8_t LCDCols, uint8_t view, Car_Data carData);
 void simplePrintLCD(SerLCD lcd, char* text, uint8_t LCDCols, uint8_t LCDRows);
+void setLCDBacklight(SerLCD lcd, uint32_t rgb);
+void setLCDBacklight(SerLCD lcd, uint8_t r, uint8_t g, uint8_t b);
+char* strlshift(char *s);
 
 // Set debugging state to 0 if not already set
 #ifndef DEBUG
 #define DEBUG 0
+#endif
+#ifndef FORCE_ERROR_VIEW
+#define FORCE_ERROR_VIEW 1
 #endif
 // Set debugging serial speed to 9600 baud if not already set
 #ifndef DEBUG_BAUD
@@ -104,6 +122,10 @@ void setup() {
 	#if (DEBUG > 0)
 		Serial.begin(DEBUG_BAUD);
 		Serial.println("\n\n\nSerial debugging enabled\n\n\n");
+		Serial.print("TX CMD status direct: ");
+		Serial.print(txMsg.status);
+		Serial.print(" | from can_get_status: ");
+		Serial.println(can_get_status(&txMsg));
 	#endif
 
 	dashStartup(lcd, false, LCDCols);
@@ -111,7 +133,6 @@ void setup() {
 	// Setting up buffers
 	txMsg.pt_data = &txBuffer[0];	// reference tx message data to tx buffer
 	rxMsg.pt_data = &rxBuffer[0];	// reference rx message data to rx buffer
-	abortMsg.pt_data = &abortBuffer[0];	// reference abort message data to abort buffer
 }
 
 void loop() {
@@ -196,158 +217,180 @@ void loop() {
 
 	// =================================================== CAN I/O ===================================================
 	// ============================================= RECEIVING CAN DATA ==============================================
-	if (!CANFault) {
-		if (!CANBusy) {
-			CANStep1 = false;
-			CANStep1 = false;
-			CANBusy = true;
-			if (millis() - lastTx > txCooldown) {
-				CANMode = TX;
-				clearBuffer(txBuffer);
-				memcpy(sendData, emptyPacket, 8);
-				sendData[0] = buttonStateDrive;
-				sendData[1] = buttonStateNeutral;
-				sendData[2] = buttonStateReverse;
-				sendData[3] = toggleState1;
-				sendData[4] = toggleState2;
-				sendData[7] = toggleByte;
-				toggleByte = toggleByte == 0 ? 1 : 0;
-				memcpy(txBuffer, sendData, 8);
-				// Set up TX CAN packet.
-				txMsg.ctrl.ide 	= MESSAGE_PROTOCOL; // Set CAN protocol (0: CAN 2.0A, 1: CAN 2.0B)
-				txMsg.id.ext   	= MESSAGE_ID;   	// Set message ID
-				txMsg.dlc      	= MESSAGE_LENGTH;   // Data length: 8 bytes
-				txMsg.ctrl.rtr 	= MESSAGE_RTR;      // Set rtr bit
-				txMsg.cmd 		= CMD_TX_DATA;		// Set TX command
-				#if (DEBUG > 0)
-				Serial.println("Starting CAN TX");
-				#endif
-				can_cmd(&txMsg);
-			} else {
-				CANMode = RX;
-				clearBuffer(rxBuffer);
-				// Set up RX CAN packet.
-				rxMsg.ctrl.ide 	= MESSAGE_PROTOCOL; // Set CAN protocol (0: CAN 2.0A, 1: CAN 2.0B)
-				rxMsg.id.ext   	= MESSAGE_ID;   	// Set message ID
-				rxMsg.dlc      	= MESSAGE_LENGTH;   // Data length: 8 bytes
-				rxMsg.ctrl.rtr 	= MESSAGE_RTR;      // Set rtr bit
-				rxMsg.cmd 		= CMD_RX_DATA;		// Set RX command
-				#if (DEBUG > 0)
-				Serial.println("Starting CAN RX");
-				#endif
-				can_cmd(&rxMsg);
-			}
+	
+	if (!CANBusy) {
+		CANStep1 = false;
+		CANStep1 = false;
+		CANBusy = true;
+		if (millis() - lastTx > txCooldown && CANMode == RX) {
+			CANMode = TX;
+			clearBuffer(txBuffer);
+			memcpy(sendData, emptyPacket, 8);
+			/*
+			CAN data transmit format:
+
+			[drivebutton (0/1), 
+			neutralbutton (0/1), 
+			reversebutton (0/1), 
+			toggle1 (0/1/2), 
+			toggle2 (0/1/2),
+			toggleByte (0/1)]
+			*/
+
+			sendData[0] = buttonStateDrive;
+			sendData[1] = buttonStateNeutral;
+			sendData[2] = buttonStateReverse;
+			sendData[3] = toggleState1;
+			sendData[4] = toggleState2;
+			sendData[7] = toggleByte;
+			toggleByte = toggleByte == 0 ? 1 : 0;
+			memcpy(txBuffer, sendData, 8);
+			// Set up TX CAN packet.
+			txMsg.ctrl.ide 	= MESSAGE_PROTOCOL; // Set CAN protocol (0: CAN 2.0A, 1: CAN 2.0B)
+			txMsg.id.ext   	= MESSAGE_ID;   	// Set message ID
+			txMsg.dlc      	= MESSAGE_LENGTH;   // Data length: 8 bytes
+			txMsg.ctrl.rtr 	= MESSAGE_RTR;      // Set rtr bit
+			txMsg.cmd 		= CMD_TX_DATA;		// Set TX command
+			#if (DEBUG > 1)
+			Serial.println("Starting CAN TX");
+			#endif
+			can_cmd(&txMsg);
 		} else {
-			if (CANMode == TX) {
-				// Check if command was accepted
-				if (can_cmd(&txMsg) == CAN_CMD_ACCEPTED) {
-					#if (DEBUG > 0)
-					Serial.println("CAN TX accepted");
-					#endif
-					CANStep1 = true;
-				}
-				// Check if command finished
-				if (can_cmd(&txMsg) == CAN_STATUS_COMPLETED) {
-					#if (DEBUG > 0)
-					Serial.println("CAN TX done");
-					#endif
-					CANStep2 = true;
-				}
-				// Attempt to recover if CAN refuses command
-				if (can_cmd(&txMsg) == CAN_CMD_REFUSED) {
-					#if (DEBUG > 0)
-					Serial.println("CAN TX refused. Resetting...");
-					#endif
-					// Set up abort CAN packet.
-					abortMsg.ctrl.ide 	= MESSAGE_PROTOCOL; // Set CAN protocol (0: CAN 2.0A, 1: CAN 2.0B)
-					abortMsg.id.ext   	= MESSAGE_ID;   	// Set message ID
-					abortMsg.dlc      	= MESSAGE_LENGTH;   // Data length: 8 bytes
-					abortMsg.ctrl.rtr 	= MESSAGE_RTR;      // Set rtr bit
-					abortMsg.cmd 		= CMD_ABORT;		// Set abort command
-					while(can_cmd(&abortMsg) != CAN_CMD_ACCEPTED);
-					#if (DEBUG > 0)
-					Serial.println("CAN abort accepted");
-					#endif
-					CANStep1 = true;
-					while(can_cmd(&abortMsg) == CAN_STATUS_NOT_COMPLETED);
-					#if (DEBUG > 0)
-					Serial.println("CAN aborted");
-					#endif
-					// CAN failed, car is not safe to drive
-					if (can_get_status(&abortMsg) == CAN_STATUS_ERROR) {
-						CANFault = true;
-						fault = true;
-						snprintf(faultReason, (LCDRows * LCDCols - 7), "CAN BROKE TURN OFF CAR");
-						#if (DEBUG > 0)
-						Serial.println("CAN failed");
-						#endif
-					}
-					CANStep2 = true;
-				}
-			} else if (CANMode == RX) {
-				// Check if command was accepted
-				if (can_cmd(&rxMsg) == CAN_CMD_ACCEPTED) {
-					#if (DEBUG > 0)
-					Serial.println("CAN RX accepted");
-					#endif
-									CANStep1 = true;
-				}
-				// Check if command was finished
-				if (can_cmd(&rxMsg) == CAN_STATUS_COMPLETED) {
-					#if (DEBUG > 0)
-					Serial.println("CAN RX done");
-					#endif
-					CANStep2 = true;
-				}
-				// Attempt to recover if CAN refuses command
-				if (can_cmd(&rxMsg) == CAN_CMD_REFUSED) {
-					#if (DEBUG > 0)
-					Serial.println("CAN RX refused. Resetting...");
-					#endif
-					// Set up abort CAN packet.
-					abortMsg.ctrl.ide 	= MESSAGE_PROTOCOL; // Set CAN protocol (0: CAN 2.0A, 1: CAN 2.0B)
-					abortMsg.id.ext   	= MESSAGE_ID;   	// Set message ID
-					abortMsg.dlc      	= MESSAGE_LENGTH;   // Data length: 8 bytes
-					abortMsg.ctrl.rtr 	= MESSAGE_RTR;      // Set rtr bit
-					abortMsg.cmd 		= CMD_ABORT;		// Set abort command
-					while(can_cmd(&abortMsg) != CAN_CMD_ACCEPTED);
-					#if (DEBUG > 0)
-					Serial.println("CAN abort accepted");
-					#endif
-					CANStep1 = true;
-					while(can_cmd(&abortMsg) == CAN_STATUS_NOT_COMPLETED);
-					#if (DEBUG > 0)
-					Serial.println("CAN aborted");
-					#endif
-					// CAN failed, car is not safe to drive
-					if (can_get_status(&abortMsg) == CAN_STATUS_ERROR) {
-						CANFault = true;
-						fault = true;
-						snprintf(faultReason, (LCDRows * LCDCols - 7), "CAN BROKE TURN OFF CAR");
-						#if (DEBUG > 0)
-						Serial.println("CAN failed");
-						#endif
-					}
-					CANStep2 = true;
-				}
+			/*
+			CAN data receive format (big-endian):
+
+			Packet 1:
+			[0]
+			Bits 0-3 -> Drive state
+			[1,2,3,4]
+			Bits 8-39 -> 32 bit accumulator voltage
+			[5,6,7]
+			Bits 40-63 -> Some sort current?
+
+			Packet 2:
+			[]
+
+			*/
+			CANMode = RX;
+			clearBuffer(rxBuffer);
+			// Set up RX CAN packet.
+			rxMsg.ctrl.ide 	= MESSAGE_PROTOCOL; // Set CAN protocol (0: CAN 2.0A, 1: CAN 2.0B)
+			rxMsg.id.ext   	= MESSAGE_ID;   	// Set message ID
+			rxMsg.dlc      	= MESSAGE_LENGTH;   // Data length: 8 bytes
+			rxMsg.ctrl.rtr 	= MESSAGE_RTR;      // Set rtr bit
+			rxMsg.cmd 		= CMD_RX_DATA;		// Set RX command
+			#if (DEBUG > 1)
+			Serial.println("Starting CAN RX");
+			#endif
+			can_cmd(&rxMsg);
+		}
+	} else {
+		if (CANMode == TX) {
+			// Check if command was accepted
+			if (can_cmd(&txMsg) == CAN_CMD_ACCEPTED) {
+				#if (DEBUG > 1)
+				Serial.println("CAN TX accepted");
+				#endif
+				CANStep1 = true;
 			}
-			if (CANStep1 && CANStep2) {
-				CANBusy = false;
+			// Check if command finished
+			if (can_cmd(&txMsg) == CAN_STATUS_COMPLETED) {
+				#if (DEBUG > 1)
+				Serial.println("CAN TX done");
+				#endif
+				CANStep2 = true;
+				CANErrors = 0;
 			}
+			// Attempt to recover if CAN refuses command
+			if (can_cmd(&txMsg) == CAN_CMD_REFUSED) {
+				CANErrors++;
+				#if (DEBUG > 1)
+				Serial.println("CAN TX refused. Resetting...");
+				#endif
+				txMsg.cmd 		= CMD_ABORT;		// Set abort command
+				while(can_cmd(&txMsg) != CAN_CMD_ACCEPTED);
+				#if (DEBUG > 1)
+				Serial.println("CAN abort accepted");
+				#endif
+				CANStep1 = true;
+				while(can_cmd(&txMsg) == CAN_STATUS_NOT_COMPLETED);
+				#if (DEBUG > 1)
+				Serial.println("CAN aborted");
+				#endif
+				CANStep2 = true;
+			}
+		} else if (CANMode == RX) {
+			// Check if command was accepted
+			if (can_cmd(&rxMsg) == CAN_CMD_ACCEPTED) {
+				#if (DEBUG > 1)
+				Serial.println("CAN RX accepted");
+				#endif
+								CANStep1 = true;
+			}
+			// Check if command was finished
+			if (can_cmd(&rxMsg) == CAN_STATUS_COMPLETED) {
+				#if (DEBUG > 1)
+				Serial.println("CAN RX done");
+				#endif
+				CANStep2 = true;
+				CANErrors = 0;
+			}
+			// Attempt to recover if CAN refuses command
+			if (can_cmd(&rxMsg) == CAN_CMD_REFUSED) {
+				CANErrors++;
+				#if (DEBUG > 1)
+				Serial.println("CAN RX refused. Resetting...");
+				#endif
+				rxMsg.cmd 		= CMD_ABORT;		// Set abort command
+				while(can_cmd(&rxMsg) != CAN_CMD_ACCEPTED);
+				#if (DEBUG > 1)
+				Serial.println("CAN abort accepted");
+				#endif
+				CANStep1 = true;
+				while(can_cmd(&rxMsg) == CAN_STATUS_NOT_COMPLETED);
+				#if (DEBUG > 1)
+				Serial.println("CAN aborted");
+				#endif
+				CANStep2 = true;
+			}
+		}
+		if (CANStep1 && CANStep2) {
+			CANBusy = false;
+		}
+		if (CANErrors >= CANErrorThreshold) {
+			// CAN failed, car is not safe to drive
+			CANFault = true;
+			snprintf(faultReason, (LCDRows * LCDCols - 7), "CAN FAULT PRESS E-STOP");
+			#if (DEBUG > 1)
+			Serial.println("CAN failed");
+			#endif
+		} else if (CANFault) {
+			CANFault = false;
+			#if (DEBUG > 1)
+			Serial.println("CAN fault cleared");
+			#endif
 		}
 	}
 
 	// Interpreting CVC data
-	parseRx(&rxMsg);
-
+	// parseRx(&rxMsg);
+	// ========================================== CHECKING FOR ERRORS/FAULTS =========================================
+	fault = (CANFault); // (CANFault || SomeOtherFault || AnotherFault)
+	// warning = ();
+	
 	// ============================================ UPDATING DISPLAY/LEDS ============================================
+	
 	if (warning || fault) {
 		if (warning) {
+			#if (FORCE_ERROR_VIEW)
 			dashView = 0;
+			#endif
 			snprintf(carData.error, carData.maxError, warningReason);
 		}
 		if (fault) {
+			#if (FORCE_ERROR_VIEW)
 			dashView = 1;
+			#endif
 			snprintf(carData.error, carData.maxError, faultReason);
 		}
 	}
@@ -368,6 +411,61 @@ void loop() {
 
 
 // =============================================== FUNCTION DEFINITIONS ==============================================
+/**
+* Overload for separate r,g,b setLCBacklight
+*
+* @param lcd An initialized SerLCD object
+* @param rgb A 32 bit unsigned integer representing an rgb value
+* @return none.
+*/
+void setLCDBacklight(SerLCD lcd, uint32_t rgb) {
+	// convert from hex triplet to byte values
+	uint8_t r = (rgb >> 16) & 0x0000FF;
+	uint8_t g = (rgb >> 8) & 0x0000FF;
+	uint8_t b = rgb & 0x0000FF;
+
+  	setLCDBacklight(lcd, r, g, b);
+}
+
+/**
+* A function for changing the RGB backlight of the LCD only
+* when the color will be different from what is already set
+*
+* @param lcd An initialized SerLCD object
+* @param r An 8 bit unsigned integer for the red portion
+* @param g An 8 bit unsigned integer for the blue portion
+* @param b An 8 bit unsigned integer for the green portion
+* @return none.
+*/
+void setLCDBacklight(SerLCD lcd, uint8_t r, uint8_t g, uint8_t b) {
+	if (r != lcd_r || g != lcd_g || b != lcd_b) {
+		#if (DEBUG > 2)
+		Serial.print("New LCD RGB: r = ");
+		Serial.print(r);
+		Serial.print(" | g = ");
+		Serial.print(g);
+		Serial.print(" | b = ");
+		Serial.println(b);
+		#endif
+		lcd_r = r;
+		lcd_g = g;
+		lcd_b = b;
+		lcd.setFastBacklight(r, g, b);
+	}
+}
+
+char* strlshift(char *s) {
+    uint32_t n = strlen(s);
+	uint32_t i;
+
+	for (i = 0; i < (n - 1); i++) {
+		s[i] = s[i + 1];
+	}
+	s[n - 1] = ' ';
+
+    return s;
+}
+
 void simplePrintLCD(SerLCD lcd, char* text, uint8_t LCDCols, uint8_t LCDRows) {
 	int character = 0;
     int length = strlen(text);
@@ -382,8 +480,27 @@ void simplePrintLCD(SerLCD lcd, char* text, uint8_t LCDCols, uint8_t LCDRows) {
             character++;
         }
 		rowBuffer[character] = '\0';
+		
+		// Removing leading space
+		if (rowBuffer[0] == ' ') {
+			#if (DEBUG > 0)
+			Serial.println("Before string shift");
+			Serial.println(rowBuffer);
+			#endif
+			strlshift(rowBuffer);
+		}
 		#if (DEBUG > 0)
 		Serial.println(rowBuffer);
+		#endif
+
+		
+		#if (DEBUG > 1)
+		Serial.println("Buffer ints: ");
+		for (int i = 0; i < strlen(rowBuffer); i++) {
+			Serial.print((int)rowBuffer[i]);
+			Serial.print(", ");
+		}
+		Serial.println("");
 		#endif
 		lcd.setCursor(0, i);
 		lcd.print(rowBuffer);
@@ -394,11 +511,20 @@ void updateDisplay(SerLCD lcd, char** dashDisplays, uint8_t LCDCols, uint8_t vie
 	char dBuffer[LCDCols*LCDRows + 1];
 
 	if (view == 0) { // Warning view
-		lcd.setFastBacklight(yellow);
+		setLCDBacklight(lcd, yellow);
+		#if (DEBUG > 0)
+		Serial.println("Set backlight to yellow");
+		#endif
 	} else if (view == 1) {
-		lcd.setFastBacklight(red);
+		setLCDBacklight(lcd, red);
+		#if (DEBUG > 0)
+		Serial.println("Set backlight to red");
+		#endif
 	} else {
-		lcd.setFastBacklight(white);
+		setLCDBacklight(lcd, white);
+		#if (DEBUG > 0)
+		Serial.println("Set backlight to white");
+		#endif
 	}
 	generateDisplay(dashDisplays, dBuffer, LCDCols*LCDRows + 1, dashView, carData);
 	simplePrintLCD(lcd, dBuffer, LCDCols, LCDRows);
@@ -421,7 +547,15 @@ void generateDisplay(char** dashDisplays, char* outString, uint32_t size, uint8_
 		// Speed (MPH), Drive state, Voltage, Current
 		// 3 digit integer, 8 character string, 5 digit float, 5 digit float
 		dtostrf(carData.voltageHigh, 4, 1, str_v);
+		
+		// Fixing slightly dumb dtostrf implementation bug
+		while (str_v[0] == ' ') {
+			strlshift(str_v);
+		}
 		dtostrf(carData.current, 4, 1, str_i);
+		while (str_i[0] == ' ') {
+			strlshift(str_i);
+		}
 		carData.stateStr(state);
 
 		snprintf(outString, size, dashDisplays[view], carData.speed, state, str_v, str_i);
@@ -434,6 +568,13 @@ void generateDisplay(char** dashDisplays, char* outString, uint32_t size, uint8_
 	}
 }
 
+
+/**
+* Interprets a received CAN packet
+*
+* @param rxMsg an st_cmd_t* structure.
+* @return none.
+*/
 void parseRx(st_cmd_t* rxMsg) {
 	#if (DEBUG > 0)
 	SerialPrintCAN(rxMsg);
@@ -441,7 +582,17 @@ void parseRx(st_cmd_t* rxMsg) {
 }
 
 
-// Testing everything on dashboard power up
+/**
+* Tests the dashboard LEDs and LCD on dashboard
+*	startup.
+*
+* @param rxMsg ASTCanLib st_cmd_t* structure.
+* @param skip Determines whether the startup animation 
+* 	should be skipped.
+* @param LCDCols 8 bit integer that sets the number of 
+* 	LCD columns.
+* @return none.
+*/
 void dashStartup(SerLCD lcd, bool skip, uint8_t LCDCols) {
 	byte red, green, blue = 0;
 	int16_t angle = 0;
@@ -501,11 +652,11 @@ void dashStartup(SerLCD lcd, bool skip, uint8_t LCDCols) {
 				lcd.print(loadBar);
 			}
 
-			lcd.setFastBacklight(red, green, blue);
+			setLCDBacklight(lcd, red, green, blue);
 		}
 	}
 
-	lcd.setFastBacklight(white);
+	setLCDBacklight(lcd, white);
 	lcd.setCursor(0, 0);
 	lcd.print("                ");
 	lcd.setCursor(0, 0);
@@ -523,6 +674,13 @@ void dashStartup(SerLCD lcd, bool skip, uint8_t LCDCols) {
 }
 
 #if (DEBUG > 0)
+/**
+* Formats and prints an ASTCanLib st_cmd_t message to
+* 	the serial port
+*
+* @param msg ASTCanLib st_cmd_t* structure.
+* @return none.
+*/
 void SerialPrintCAN(st_cmd_t *msg){
 	char textBuffer[50] = {0};
 	if (msg->ctrl.ide>0){

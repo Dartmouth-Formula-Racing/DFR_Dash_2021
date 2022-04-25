@@ -15,7 +15,7 @@ __________________
 |287.3 V  794.3 A|
 ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 */
-char ds_vbat_ibat_vel_screen[] = "%-3i MPH %8s%5s V  %5s A";
+char ds_vbat_ibat_vel_screen[] = "%-3i MPH %8s%-5s V  %5s A";
 
 
 // Battery temperature, Motor temperature, Motor driver temperature
