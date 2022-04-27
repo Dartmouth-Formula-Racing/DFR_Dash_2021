@@ -287,7 +287,7 @@ void loop() {
 	// 	}
 	// }
 
-	if (millis() - lastTx > txCooldown && CANMode == RX) {
+	if (millis() - lastTx > txCooldown) {
 		CANMode = TX;
 		clearBuffer(txBuffer);
 		memcpy(sendData, emptyPacket, 8);
