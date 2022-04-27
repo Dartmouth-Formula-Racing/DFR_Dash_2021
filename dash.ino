@@ -209,7 +209,7 @@ void loop() {
 	}
 
 	// ================================== SWITCHING SCREENS WITH TOGGLES EVENTUALLY ==================================
-	if (buttonPulseDrive == HIGH) {
+	if (toggleState1 == HIGH) {
 		if (dashView < (sizeof(dashDisplays)/sizeof(dashDisplays[0]) - 1)) {
 			dashView++;
 		} else {
@@ -521,10 +521,25 @@ void loop() {
 		lastDisplay = millis();
 		needsUpdate = false;
 	}
-
-	digitalWrite(LEDPinDrive, buttonStateDrive);
-	digitalWrite(LEDPinNeutral, buttonStateNeutral);
-	digitalWrite(LEDPinReverse, buttonStateReverse);
+	if (carData.cvcState == DRIVE) {
+		digitalWrite(LEDPinDrive, HIGH);
+		digitalWrite(LEDPinNeutral, LOW);
+		digitalWrite(LEDPinReverse, LOW);
+	} else if (carData.cvcState == NEUTRAL) {
+		digitalWrite(LEDPinDrive, LOW);
+		digitalWrite(LEDPinNeutral, HIGH);
+		digitalWrite(LEDPinReverse, LOW);
+	} else if (carData.cvcState == REVERSE) {
+		digitalWrite(LEDPinDrive, LOW);
+		digitalWrite(LEDPinNeutral, LOW);
+		digitalWrite(LEDPinReverse, HIGH);
+	} else {
+		digitalWrite(LEDPinDrive, LOW);
+		digitalWrite(LEDPinNeutral, LOW);
+		digitalWrite(LEDPinReverse, LOW);
+	}
+	
+	
 
 
 	// =========================================== WAITING UNTIL NEXT LOOP ===========================================
@@ -652,15 +667,20 @@ void simplePrintLCD(SerLCD lcd, char* text, uint8_t LCDCols, uint8_t LCDRows) {
 void updateDisplay(SerLCD lcd, char** dashDisplays, uint8_t LCDCols, uint8_t view, Car_Data carData) {
 	char dBuffer[LCDCols*LCDRows + 1];
 
-	if (view == 0) { // Warning view
+	if (view == warning_screen) { // Warning view
 		setLCDBacklight(lcd, yellow);
 		#if (DEBUG > 0)
 		Serial.println("Set backlight to yellow");
 		#endif
-	} else if (view == 1) {
+	} else if (view == fault_screen) {
 		setLCDBacklight(lcd, red);
 		#if (DEBUG > 0)
 		Serial.println("Set backlight to red");
+		#endif
+	} else if (view == charging_screen) {
+		setLCDBacklight(lcd, green);
+		#if (DEBUG > 0)
+		Serial.println("Set backlight to green");
 		#endif
 	} else {
 		setLCDBacklight(lcd, white);
@@ -673,15 +693,15 @@ void updateDisplay(SerLCD lcd, char** dashDisplays, uint8_t LCDCols, uint8_t vie
 }
 
 void generateDisplay(char** dashDisplays, char* outString, uint32_t size, uint8_t view, Car_Data carData) {
-	if (view == 0) {
+	if (view == warning_screen) {
 		// Warning screen
 		// 23 character string
 		snprintf(outString, size, dashDisplays[view], carData.error);
-	} else if (view == 1) {
+	} else if (view == fault_screen) {
 		// Fault screen
 		// 25 character string
 		snprintf(outString, size, dashDisplays[view], carData.error);
-	} else if (view == 2) {
+	} else if (view == ds_vbat_ibat_vel_screen) {
 		char str_v[5];
 		char str_i[5];
 		char state[8];
@@ -701,10 +721,12 @@ void generateDisplay(char** dashDisplays, char* outString, uint32_t size, uint8_
 		carData.stateStr(state);
 
 		snprintf(outString, size, dashDisplays[view], carData.speed, state, str_v, str_i);
-	} else if (view == 3) {
+	} else if (view == tbat_tmotor_tinverter) {
 		// Battery temperature, Motor temperature, Motor driver temperature
 		// 3 digit int, 3 digit int, 3 digit int
-		snprintf(outString, size, dashDisplays[view], carData.tempBat, carData.tempMotor, carData.tempDriver);
+		snprintf(outString, size, dashDisplays[view], carData.tempBat, (int)(carData.tempMotor + 0.5), (int)(carData.tempInverter + 0.5));
+	} else if (view == charging_screen) {
+		
 	} else {
 		snprintf(outString, size, "Invalid display ID (%d)", view);
 	}
@@ -737,7 +759,7 @@ void parseRx(st_cmd_t* rxMsg) {
 	// SerialPrintCAN(rxMsg);
 	#endif
 	uint32_t id;
-	uint32_t tempVoltageHigh;
+	int32_t tempVoltageHigh;
 	uint16_t tempCurrent;
 	if (rxMsg->ctrl.ide > 0) {
 		id = rxMsg->id.ext;
@@ -752,7 +774,7 @@ void parseRx(st_cmd_t* rxMsg) {
 		#endif
 		carData.cvcState = (cvc_state)rxMsg->pt_data[0];
 		carData.cvcFault = (cvc_fault)rxMsg->pt_data[1];
-		tempVoltageHigh = (uint32_t)rxMsg->pt_data[2] << 24 | (uint32_t)rxMsg->pt_data[3] << 16 | (uint32_t)rxMsg->pt_data[4] << 8 | rxMsg->pt_data[5];
+		tempVoltageHigh = (int32_t)((uint32_t)rxMsg->pt_data[2] << 24 | (uint32_t)rxMsg->pt_data[3] << 16 | (uint32_t)rxMsg->pt_data[4] << 8 | rxMsg->pt_data[5]);
 		carData.voltageHigh = ((float)tempVoltageHigh)/100.0;
 		tempCurrent = (uint16_t)rxMsg->pt_data[6] << 8 | rxMsg->pt_data[7];
 		carData.current = ((float)tempCurrent)/100.0;
@@ -761,9 +783,18 @@ void parseRx(st_cmd_t* rxMsg) {
 		#if (DEBUG > 0)
 		Serial.println("Received 0x7FF");
 		SerialPrintCAN(rxMsg);
-		Serial.print("Z axis: ");
-		Serial.println((uint16_t)rxMsg->pt_data[0] << 8 | (uint16_t)rxMsg->pt_data[1]);
 		#endif
+		// Not sure which is more correct - Need to test
+		// carData.tempBat = map(rxMsg->pt_data[0], 0, 255, -100, 100);
+		carData.tempBat = ((int)rxMsg->pt_data[0]) - 100;
+		
+		
+		carData.tempMotor = ((float)((int)((uint16_t)rxMsg->pt_data[1] << 8 | rxMsg->pt_data[2])))/10.0;
+
+		carData.tempInverter = ((float)((int)((uint16_t)rxMsg->pt_data[3] << 8 | rxMsg->pt_data[4])))/10.0;;		
+
+
+
 	}
 }
 
@@ -781,9 +812,9 @@ void parseRx(st_cmd_t* rxMsg) {
 */
 void dashStartup(SerLCD lcd, bool skip, uint8_t LCDCols) {
 	byte red, green, blue = 0;
-	int16_t angle = 0;
-	int16_t barSize = 0;
-	int16_t newBarSize = 0;
+	int angle = 0;
+	int barSize = 0;
+	int newBarSize = 0;
 	char loadBar[LCDCols] = {0};
 	digitalWrite(LEDPinReadyToDriveR, HIGH);
 	digitalWrite(LEDPinReadyToDriveG, HIGH);
@@ -800,7 +831,7 @@ void dashStartup(SerLCD lcd, bool skip, uint8_t LCDCols) {
 	#else
 		lcd.print("    Starting    ");
 	#endif
-
+	delay(50);
 	if (!skip) {
 
 		loadBar[0] = '\xff';
@@ -848,6 +879,8 @@ void dashStartup(SerLCD lcd, bool skip, uint8_t LCDCols) {
 	lcd.setCursor(0, 0);
 	delay(50);
 	lcd.print("Dashboard loaded");
+	delay(250);
+	lcd.clear();
 	digitalWrite(LEDPinReadyToDriveR, LOW);
 	digitalWrite(LEDPinReadyToDriveG, LOW);
 	digitalWrite(LEDPinPrechargeR, LOW);
@@ -856,7 +889,7 @@ void dashStartup(SerLCD lcd, bool skip, uint8_t LCDCols) {
 	digitalWrite(LEDPinDrive, LOW);
 	digitalWrite(LEDPinNeutral, LOW);
 	digitalWrite(LEDPinReverse, LOW);
-	delay(250);
+	delay(50);
 }
 
 #if (DEBUG > 0)
@@ -891,7 +924,7 @@ void SerialPrintCAN(st_cmd_t *msg){
 	sprintf(textBuffer,"data ");
 	Serial.print(textBuffer);
 
-	for (int16_t i =0; i<msg->dlc; i++){
+	for (int i =0; i<msg->dlc; i++){
 		sprintf(textBuffer,"%02X ",msg->pt_data[i]);
 		Serial.print(textBuffer);
 	}
