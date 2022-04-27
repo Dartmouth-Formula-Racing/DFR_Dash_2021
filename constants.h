@@ -5,7 +5,10 @@ const uint16_t dashLoopTime = 0;        // (milliseconds) | Defines the minimum 
 
 
 // CAN definitions
-#define MESSAGE_ID        123       // Message ID
+#define MESSAGE_ID_1      0x400     // Message 1 ID
+#define MESSAGE_ID_2      0x401     // Message 2 ID
+#define MESSAGE_ID_3      0x402     // Message 3 ID
+#define MESSAGE_ID_4      0x403     // Message 4 ID
 #define MESSAGE_PROTOCOL  1         // CAN protocol (0: CAN 2.0A, 1: CAN 2.0B)
 #define MESSAGE_LENGTH    8         // Data length: 8 bytes
 #define MESSAGE_RTR       0         // rtr bit

@@ -14,11 +14,15 @@ Car_Data::Car_Data(int LCDCols, int LCDRows) {
 Car_Data::~Car_Data() {}
 
 void Car_Data::stateStr(char* out) {
-    if (this->cvcState == DRIVE) {
+    if (this->cvcState == PRECHARGE) { 
+        snprintf(out, 8, "PRECHRG"); 
+    } else if (this->cvcState == DRIVE) {
         snprintf(out, 6, "DRIVE");
     } else if (this->cvcState == NEUTRAL) {
         snprintf(out, 8, "NEUTRAL");
     } else if (this->cvcState == REVERSE) {
         snprintf(out, 8, "REVERSE");
+    } else {
+        snprintf(out, 8, "UNKNOWN");
     }
 }

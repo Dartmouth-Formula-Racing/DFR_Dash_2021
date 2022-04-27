@@ -17,9 +17,9 @@
 #include "dash_screens.h"
 
 // Enable debugging over serial
-#define DEBUG 3
+#define DEBUG 1
 #define DEBUG_BAUD 1000000
-#define FORCE_ERROR_VIEW 0
+#define FORCE_ERROR_VIEW 1
 
 enum CAN_MODE {TX, RX};
 
@@ -31,7 +31,7 @@ uint8_t buttonStateReverse = LOW;
 uint8_t buttonPulseReverse = LOW;
 uint8_t toggleState1 = 0;
 uint8_t toggleState2 = 0;
-uint8_t toggleByte = 0;
+uint8_t dashAlive = 0;
 
 st_cmd_t txMsg;
 st_cmd_t rxMsg;
@@ -55,6 +55,7 @@ SerLCD lcd;
 uint8_t lcd_r = 0;
 uint8_t lcd_g = 0;
 uint8_t lcd_b = 0;
+bool needsUpdate = true;
 
 bool warning = false;
 bool fault = false;
@@ -77,6 +78,7 @@ Car_Data carData(LCDCols, LCDRows);
 
 // Function prototypes
 void parseRx(st_cmd_t* rxMsg);
+void CANTx(st_cmd_t* msg);
 void dashStartup(SerLCD lcd, bool skip, uint8_t LCDCols);
 void generateDisplay(char** dashDisplays, char* outString, uint32_t size, uint8_t view, Car_Data carData);
 void updateDisplay(SerLCD lcd, char** dashDisplays, uint8_t LCDCols, uint8_t view, Car_Data carData);
@@ -213,151 +215,286 @@ void loop() {
 		} else {
 			dashView = 0;
 		}
+		needsUpdate = true;
 	}
 
 	// =================================================== CAN I/O ===================================================
 	// ============================================= RECEIVING CAN DATA ==============================================
 	
-	if (!CANBusy) {
-		CANStep1 = false;
-		CANStep1 = false;
-		CANBusy = true;
-		if (millis() - lastTx > txCooldown && CANMode == RX) {
-			CANMode = TX;
-			clearBuffer(txBuffer);
-			memcpy(sendData, emptyPacket, 8);
-			/*
-			CAN data transmit format:
+	// if (!CANBusy) {
+	// 	if ((millis() - lastTx > txCooldown) && CANMode == RX) {
+	// 		clearBuffer(txBuffer);
+	// 		sendData[0] = buttonStateDrive;
+	// 		sendData[1] = buttonStateNeutral;
+	// 		sendData[2] = buttonStateReverse;
+	// 		sendData[3] = toggleState1;
+	// 		sendData[4] = toggleState2;
+	// 		sendData[7] = dashAlive;
+	// 		dashAlive = dashAlive == 0 ? 1 : 0;
+	// 		memcpy(txBuffer, sendData, 8);
+	// 		// Set up TX CAN packet.
+	// 		txMsg.ctrl.ide 	= MESSAGE_PROTOCOL; // Set CAN protocol (0: CAN 2.0A, 1: CAN 2.0B)
+	// 		txMsg.id.ext   	= MESSAGE_ID;   	// Set message ID
+	// 		txMsg.dlc      	= MESSAGE_LENGTH;   // Data length: 8 bytes
+	// 		txMsg.ctrl.rtr 	= MESSAGE_RTR;      // Set rtr bit
+	// 		txMsg.cmd 		= CMD_TX_DATA;		// Set TX command
 
-			[drivebutton (0/1), 
-			neutralbutton (0/1), 
-			reversebutton (0/1), 
-			toggle1 (0/1/2), 
-			toggle2 (0/1/2),
-			toggleByte (0/1)]
-			*/
+	// 		can_cmd(&txMsg);
+	// 		#if (DEBUG > 0)
+	// 		Serial.println("Started CAN TX");
+	// 		#endif
+	// 	} else {
+	// 		clearBuffer(rxBuffer);
+	// 		// Set up RX CAN packet.
+	// 		rxMsg.ctrl.ide 	= MESSAGE_PROTOCOL; // Set CAN protocol (0: CAN 2.0A, 1: CAN 2.0B)
+	// 		rxMsg.id.ext   	= MESSAGE_ID;   	// Set message ID
+	// 		rxMsg.dlc      	= MESSAGE_LENGTH;   // Data length: 8 bytes
+	// 		rxMsg.ctrl.rtr 	= MESSAGE_RTR;      // Set rtr bit
+	// 		rxMsg.cmd 		= CMD_RX_DATA;		// Set RX command
+			
+	// 		can_cmd(&rxMsg);
+	// 		#if (DEBUG > 0)
+	// 		Serial.println("Started CAN RX");
+	// 		#endif
+	// 	}
+	// 	CANBusy = true;
+	// } else {
+	// 	if (CANMode == RX) {
+	// 		if (!CANStep1) {
+	// 			CANStep1 = (can_cmd(&rxMsg) == CAN_CMD_ACCEPTED);
+	// 		} else if (can_get_status(&rxMsg) == CAN_STATUS_COMPLETED) {
+	// 			#if (DEBUG > 0)
+	// 			Serial.println("Finished CAN RX");
+	// 			#endif
+	// 			CANStep1 = false;
+	// 			CANBusy = false;
+	// 			CANMode = TX;
+	// 			parseRx(&rxMsg);
+	// 		}
+	// 	}
+	// 	if (CANMode == TX) {
+	// 		if (!CANStep1) {
+	// 			CANStep1 = (can_cmd(&txMsg) == CAN_CMD_ACCEPTED);
+	// 		} else if (can_get_status(&txMsg) == CAN_STATUS_COMPLETED) {
+	// 			#if (DEBUG > 0)
+	// 			Serial.println("Finished CAN TX");
+	// 			#endif
+	// 			CANStep1 = false;
+	// 			CANBusy = false;
+	// 			CANMode = RX;
+	// 			lastTx = millis();
+	// 		}
+	// 	}
+	// }
 
-			sendData[0] = buttonStateDrive;
-			sendData[1] = buttonStateNeutral;
-			sendData[2] = buttonStateReverse;
-			sendData[3] = toggleState1;
-			sendData[4] = toggleState2;
-			sendData[7] = toggleByte;
-			toggleByte = toggleByte == 0 ? 1 : 0;
-			memcpy(txBuffer, sendData, 8);
-			// Set up TX CAN packet.
-			txMsg.ctrl.ide 	= MESSAGE_PROTOCOL; // Set CAN protocol (0: CAN 2.0A, 1: CAN 2.0B)
-			txMsg.id.ext   	= MESSAGE_ID;   	// Set message ID
-			txMsg.dlc      	= MESSAGE_LENGTH;   // Data length: 8 bytes
-			txMsg.ctrl.rtr 	= MESSAGE_RTR;      // Set rtr bit
-			txMsg.cmd 		= CMD_TX_DATA;		// Set TX command
-			#if (DEBUG > 1)
-			Serial.println("Starting CAN TX");
-			#endif
-			can_cmd(&txMsg);
-		} else {
-			CANMode = RX;
-			clearBuffer(rxBuffer);
-			// Set up RX CAN packet.
-			rxMsg.ctrl.ide 	= MESSAGE_PROTOCOL; // Set CAN protocol (0: CAN 2.0A, 1: CAN 2.0B)
-			rxMsg.id.ext   	= MESSAGE_ID;   	// Set message ID
-			rxMsg.dlc      	= MESSAGE_LENGTH;   // Data length: 8 bytes
-			rxMsg.ctrl.rtr 	= MESSAGE_RTR;      // Set rtr bit
-			rxMsg.cmd 		= CMD_RX_DATA;		// Set RX command
-			#if (DEBUG > 1)
-			Serial.println("Starting CAN RX");
-			#endif
-			can_cmd(&rxMsg);
-		}
+	if (millis() - lastTx > txCooldown && CANMode == RX) {
+		CANMode = TX;
+		clearBuffer(txBuffer);
+		memcpy(sendData, emptyPacket, 8);
+		// Set up TX CAN packet.
+		txMsg.ctrl.ide 	= MESSAGE_PROTOCOL; // Set CAN protocol (0: CAN 2.0A, 1: CAN 2.0B)
+		txMsg.dlc      	= MESSAGE_LENGTH;   // Data length: 8 bytes
+		txMsg.ctrl.rtr 	= MESSAGE_RTR;      // Set rtr bit
+		txMsg.cmd 		= CMD_TX_DATA;		// Set TX command
+		
+		/*
+		Packet 1
+		[drivebutton (0/1), 
+		neutralbutton (0/1), 
+		reversebutton (0/1), 
+		toggle1 (0/1/2), 
+		toggle2 (0/1/2),
+		dashAlive (0/1)]
+		*/
+		sendData[0] = buttonStateDrive;
+		sendData[1] = buttonStateNeutral;
+		sendData[2] = buttonStateReverse;
+		sendData[3] = toggleState1;
+		sendData[4] = toggleState2;
+		sendData[7] = dashAlive;
+		dashAlive = dashAlive == 0 ? 1 : 0;
+		memcpy(txBuffer, sendData, 8);
+		txMsg.id.ext   	= MESSAGE_ID_1;   	// Set message ID
+		CANTx(&txMsg);
+  		
+		lastTx = millis();
+
+		#if (DEBUG > 1)
+		Serial.println("Did CAN TX");
+		#endif
 	} else {
-		if (CANMode == TX) {
-			// Check if command was accepted
-			if (can_cmd(&txMsg) == CAN_CMD_ACCEPTED) {
-				#if (DEBUG > 1)
-				Serial.println("CAN TX accepted");
-				#endif
-				CANStep1 = true;
-			}
-			// Check if command finished
-			if (can_cmd(&txMsg) == CAN_STATUS_COMPLETED) {
-				#if (DEBUG > 1)
-				Serial.println("CAN TX done");
-				#endif
-				CANStep2 = true;
-				CANErrors = 0;
-			}
-			// Attempt to recover if CAN refuses command
-			if (can_cmd(&txMsg) == CAN_CMD_REFUSED) {
-				CANErrors++;
-				#if (DEBUG > 1)
-				Serial.println("CAN TX refused. Resetting...");
-				#endif
-				txMsg.cmd 		= CMD_ABORT;		// Set abort command
-				while(can_cmd(&txMsg) != CAN_CMD_ACCEPTED);
-				#if (DEBUG > 1)
-				Serial.println("CAN abort accepted");
-				#endif
-				CANStep1 = true;
-				while(can_cmd(&txMsg) == CAN_STATUS_NOT_COMPLETED);
-				#if (DEBUG > 1)
-				Serial.println("CAN aborted");
-				#endif
-				CANStep2 = true;
-			}
-		} else if (CANMode == RX) {
-			// Check if command was accepted
-			if (can_cmd(&rxMsg) == CAN_CMD_ACCEPTED) {
-				#if (DEBUG > 1)
-				Serial.println("CAN RX accepted");
-				#endif
-								CANStep1 = true;
-			}
-			// Check if command was finished
-			if (can_cmd(&rxMsg) == CAN_STATUS_COMPLETED) {
-				#if (DEBUG > 1)
-				Serial.println("CAN RX done");
-				#endif
-				CANStep2 = true;
-				CANErrors = 0;
-				// Interpreting CVC data
-				parseRx(&rxMsg);
-			}
-			// Attempt to recover if CAN refuses command
+		CANMode = RX;
+		clearBuffer(rxBuffer);
+		// Set up RX CAN packet.
+		rxMsg.ctrl.ide 	= MESSAGE_PROTOCOL; // Set CAN protocol (0: CAN 2.0A, 1: CAN 2.0B)
+		rxMsg.id.ext   	= 0;   				// Set message ID
+		rxMsg.dlc      	= MESSAGE_LENGTH;   // Data length: 8 bytes
+		rxMsg.ctrl.rtr 	= MESSAGE_RTR;      // Set rtr bit
+		rxMsg.cmd 		= CMD_RX_DATA;		// Set RX command
+
+		
+  		while(can_cmd(&rxMsg) != CAN_CMD_ACCEPTED) {
 			if (can_cmd(&rxMsg) == CAN_CMD_REFUSED) {
-				CANErrors++;
-				#if (DEBUG > 1)
-				Serial.println("CAN RX refused. Resetting...");
-				#endif
-				rxMsg.cmd 		= CMD_ABORT;		// Set abort command
-				while(can_cmd(&rxMsg) != CAN_CMD_ACCEPTED);
-				#if (DEBUG > 1)
-				Serial.println("CAN abort accepted");
-				#endif
-				CANStep1 = true;
-				while(can_cmd(&rxMsg) == CAN_STATUS_NOT_COMPLETED);
-				#if (DEBUG > 1)
-				Serial.println("CAN aborted");
-				#endif
-				CANStep2 = true;
+				CANFault = true;
+				snprintf(faultReason, (LCDRows * LCDCols - 7), "CAN FAULT PRESS E-STOP");
 			}
 		}
-		if (CANStep1 && CANStep2) {
-			CANBusy = false;
+
+		while(can_get_status(&rxMsg) == CAN_STATUS_NOT_COMPLETED) {
+			if (can_get_status(&rxMsg) == CAN_STATUS_ERROR) {
+				CANFault = true;
+				snprintf(faultReason, (LCDRows * LCDCols - 7), "CAN FAULT PRESS E-STOP");
+			}
 		}
-		if (CANErrors >= CANErrorThreshold) {
-			// CAN failed, car is not safe to drive
-			CANFault = true;
-			snprintf(faultReason, (LCDRows * LCDCols - 7), "CAN FAULT PRESS E-STOP");
-			#if (DEBUG > 1)
-			Serial.println("CAN failed");
-			#endif
-		} else if (CANFault) {
-			CANFault = false;
-			#if (DEBUG > 1)
-			Serial.println("CAN fault cleared");
-			#endif
-		}
+		CANFault = false;
+		snprintf(faultReason, (LCDRows * LCDCols - 7), "");
+
+		parseRx(&rxMsg);
+		#if (DEBUG > 1)
+		Serial.println("Did CAN RX");
+		#endif
 	}
+
+	// if (!CANBusy) {
+	// 	CANStep1 = false;
+	// 	CANStep1 = false;
+	// 	CANBusy = true;
+	// 	if (millis() - lastTx > txCooldown && CANMode == RX) {
+	// 		CANMode = TX;
+	// 		clearBuffer(txBuffer);
+	// 		memcpy(sendData, emptyPacket, 8);
+	// 		/*
+	// 		CAN data transmit format:
+
+	// 		[drivebutton (0/1), 
+	// 		neutralbutton (0/1), 
+	// 		reversebutton (0/1), 
+	// 		toggle1 (0/1/2), 
+	// 		toggle2 (0/1/2),
+	// 		dashAlive (0/1)]
+	// 		*/
+
+	// 		sendData[0] = buttonStateDrive;
+	// 		sendData[1] = buttonStateNeutral;
+	// 		sendData[2] = buttonStateReverse;
+	// 		sendData[3] = toggleState1;
+	// 		sendData[4] = toggleState2;
+	// 		sendData[7] = dashAlive;
+	// 		dashAlive = dashAlive == 0 ? 1 : 0;
+	// 		memcpy(txBuffer, sendData, 8);
+	// 		// Set up TX CAN packet.
+	// 		txMsg.ctrl.ide 	= MESSAGE_PROTOCOL; // Set CAN protocol (0: CAN 2.0A, 1: CAN 2.0B)
+	// 		txMsg.id.ext   	= MESSAGE_ID;   	// Set message ID
+	// 		txMsg.dlc      	= MESSAGE_LENGTH;   // Data length: 8 bytes
+	// 		txMsg.ctrl.rtr 	= MESSAGE_RTR;      // Set rtr bit
+	// 		txMsg.cmd 		= CMD_TX_DATA;		// Set TX command
+	// 		#if (DEBUG > 1)
+	// 		Serial.println("Starting CAN TX");
+	// 		#endif
+	// 		can_cmd(&txMsg);
+	// 	} else {
+	// 		CANMode = RX;
+	// 		clearBuffer(rxBuffer);
+	// 		// Set up RX CAN packet.
+	// 		rxMsg.ctrl.ide 	= MESSAGE_PROTOCOL; // Set CAN protocol (0: CAN 2.0A, 1: CAN 2.0B)
+	// 		rxMsg.id.ext   	= MESSAGE_ID;   	// Set message ID
+	// 		rxMsg.dlc      	= MESSAGE_LENGTH;   // Data length: 8 bytes
+	// 		rxMsg.ctrl.rtr 	= MESSAGE_RTR;      // Set rtr bit
+	// 		rxMsg.cmd 		= CMD_RX_DATA;		// Set RX command
+	// 		#if (DEBUG > 1)
+	// 		Serial.println("Starting CAN RX");
+	// 		#endif
+	// 		can_cmd(&rxMsg);
+	// 	}
+	// } else {
+	// 	if (CANMode == TX) {
+	// 		// Check if command was accepted
+	// 		if (can_cmd(&txMsg) == CAN_CMD_ACCEPTED) {
+	// 			#if (DEBUG > 1)
+	// 			Serial.println("CAN TX accepted");
+	// 			#endif
+	// 			CANStep1 = true;
+	// 		}
+	// 		// Check if command finished
+	// 		if (can_cmd(&txMsg) == CAN_STATUS_COMPLETED) {
+	// 			#if (DEBUG > 1)
+	// 			Serial.println("CAN TX done");
+	// 			#endif
+	// 			CANStep2 = true;
+	// 			CANErrors = 0;
+	// 		}
+	// 		// Attempt to recover if CAN refuses command
+	// 		if (can_cmd(&txMsg) == CAN_CMD_REFUSED) {
+	// 			CANErrors++;
+	// 			#if (DEBUG > 1)
+	// 			Serial.println("CAN TX refused. Resetting...");
+	// 			#endif
+	// 			txMsg.cmd 		= CMD_ABORT;		// Set abort command
+	// 			while(can_cmd(&txMsg) != CAN_CMD_ACCEPTED);
+	// 			#if (DEBUG > 1)
+	// 			Serial.println("CAN abort accepted");
+	// 			#endif
+	// 			CANStep1 = true;
+	// 			while(can_cmd(&txMsg) == CAN_STATUS_NOT_COMPLETED);
+	// 			#if (DEBUG > 1)
+	// 			Serial.println("CAN aborted");
+	// 			#endif
+	// 			CANStep2 = true;
+	// 		}
+	// 	} else if (CANMode == RX) {
+	// 		// Check if command was accepted
+	// 		if (can_cmd(&rxMsg) == CAN_CMD_ACCEPTED) {
+	// 			#if (DEBUG > 1)
+	// 			Serial.println("CAN RX accepted");
+	// 			#endif
+	// 							CANStep1 = true;
+	// 		}
+	// 		// Check if command was finished
+	// 		if (can_cmd(&rxMsg) == CAN_STATUS_COMPLETED) {
+	// 			#if (DEBUG > 1)
+	// 			Serial.println("CAN RX done");
+	// 			#endif
+	// 			CANStep2 = true;
+	// 			CANErrors = 0;
+	// 			// Interpreting CVC data
+	// 			parseRx(&rxMsg);
+	// 		}
+	// 		// Attempt to recover if CAN refuses command
+	// 		if (can_cmd(&rxMsg) == CAN_CMD_REFUSED) {
+	// 			CANErrors++;
+	// 			#if (DEBUG > 1)
+	// 			Serial.println("CAN RX refused. Resetting...");
+	// 			#endif
+	// 			rxMsg.cmd 		= CMD_ABORT;		// Set abort command
+	// 			while(can_cmd(&rxMsg) != CAN_CMD_ACCEPTED);
+	// 			#if (DEBUG > 1)
+	// 			Serial.println("CAN abort accepted");
+	// 			#endif
+	// 			CANStep1 = true;
+	// 			while(can_cmd(&rxMsg) == CAN_STATUS_NOT_COMPLETED);
+	// 			#if (DEBUG > 1)
+	// 			Serial.println("CAN aborted");
+	// 			#endif
+	// 			CANStep2 = true;
+	// 		}
+	// 	}
+	// 	if (CANStep1 && CANStep2) {
+	// 		CANBusy = false;
+	// 	}
+	// 	if (CANErrors >= CANErrorThreshold) {
+	// 		// CAN failed, car is not safe to drive
+	// 		CANFault = true;
+	// 		snprintf(faultReason, (LCDRows * LCDCols - 7), "CAN FAULT PRESS E-STOP");
+	// 		#if (DEBUG > 1)
+	// 		Serial.println("CAN failed");
+	// 		#endif
+	// 	} else if (CANFault) {
+	// 		CANFault = false;
+	// 		#if (DEBUG > 1)
+	// 		Serial.println("CAN fault cleared");
+	// 		#endif
+	// 	}
+	// }
 	// ========================================== CHECKING FOR ERRORS/FAULTS =========================================
 	fault = (CANFault); // (CANFault || SomeOtherFault || AnotherFault)
 	// warning = ();
@@ -377,10 +514,12 @@ void loop() {
 			#endif
 			snprintf(carData.error, carData.maxError, faultReason);
 		}
+		needsUpdate = true;
 	}
-	if (millis() - lastDisplay > displayCooldown) {
+	if (millis() - lastDisplay > displayCooldown && needsUpdate) {
 		updateDisplay(lcd, dashDisplays, LCDCols, dashView, carData);
 		lastDisplay = millis();
+		needsUpdate = false;
 	}
 
 	digitalWrite(LEDPinDrive, buttonStateDrive);
@@ -395,6 +534,25 @@ void loop() {
 
 
 // =============================================== FUNCTION DEFINITIONS ==============================================
+void CANTx(st_cmd_t* msg) {
+	while(can_cmd(msg) != CAN_CMD_ACCEPTED) {
+		if (can_cmd(msg) == CAN_CMD_REFUSED) {
+			CANFault = true;
+			snprintf(faultReason, (LCDRows * LCDCols - 7), "CAN FAULT PRESS E-STOP");
+		}
+	}
+
+	while(can_get_status(msg) == CAN_STATUS_NOT_COMPLETED) {
+		if (can_get_status(msg) == CAN_STATUS_ERROR) {
+			CANFault = true;
+			snprintf(faultReason, (LCDRows * LCDCols - 7), "CAN FAULT PRESS E-STOP");
+		}
+	}
+	CANFault = false;
+	snprintf(faultReason, (LCDRows * LCDCols - 7), "");
+}
+
+
 /**
 * Overload for separate r,g,b setLCBacklight
 *
@@ -576,9 +734,11 @@ ID			0x7FF
 */
 void parseRx(st_cmd_t* rxMsg) {
 	#if (DEBUG > 0)
-	SerialPrintCAN(rxMsg);
+	// SerialPrintCAN(rxMsg);
 	#endif
 	uint32_t id;
+	uint32_t tempVoltageHigh;
+	uint16_t tempCurrent;
 	if (rxMsg->ctrl.ide > 0) {
 		id = rxMsg->id.ext;
 	} else {
@@ -586,12 +746,24 @@ void parseRx(st_cmd_t* rxMsg) {
 	}
 
 	if (id == 0x7FE) {
+		#if (DEBUG > 0)
+		Serial.println("Received 0x7FE");
+		SerialPrintCAN(rxMsg);
+		#endif
 		carData.cvcState = (cvc_state)rxMsg->pt_data[0];
 		carData.cvcFault = (cvc_fault)rxMsg->pt_data[1];
-		carData.voltageHigh = ((float)(rxMsg->pt_data[2] << 24 | rxMsg->pt_data[3] << 16 | rxMsg->pt_data[4] << 8 | rxMsg->pt_data[5]))/100.0;
-		carData.current = ((float)(rxMsg->pt_data[6] << 8 | rxMsg->pt_data[7]))/100.0;
+		tempVoltageHigh = (uint32_t)rxMsg->pt_data[2] << 24 | (uint32_t)rxMsg->pt_data[3] << 16 | (uint32_t)rxMsg->pt_data[4] << 8 | rxMsg->pt_data[5];
+		carData.voltageHigh = ((float)tempVoltageHigh)/100.0;
+		tempCurrent = (uint16_t)rxMsg->pt_data[6] << 8 | rxMsg->pt_data[7];
+		carData.current = ((float)tempCurrent)/100.0;
+		needsUpdate = true;
 	} else if (id == 0x7FF) {
-
+		#if (DEBUG > 0)
+		Serial.println("Received 0x7FF");
+		SerialPrintCAN(rxMsg);
+		Serial.print("Z axis: ");
+		Serial.println((uint16_t)rxMsg->pt_data[0] << 8 | (uint16_t)rxMsg->pt_data[1]);
+		#endif
 	}
 }
 

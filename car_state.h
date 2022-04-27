@@ -6,9 +6,9 @@ typedef enum cvc_fault_e {CVC_OK, CVC_WARNING, CVC_RST_FAULT, CVC_HARD_FAULT} cv
 
 class Car_Data {
 public:
-    float voltageLow = (float)0.0;   // HV battery voltage
-    float voltageHigh = (float)0.0;  // LV battery voltage
-    float current = (float)0.0;
+    float voltageLow = (float)0.0;  // HV battery voltage
+    float voltageHigh = (float)0.0; // LV battery voltage - probably no sensor
+    float current = (float)0.0;     // Maybe?
 
     int speed = 0;
     int tempBat = 0;
