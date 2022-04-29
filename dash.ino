@@ -720,11 +720,11 @@ void generateDisplay(char** dashDisplays, char* outString, uint32_t size, uint8_
 		}
 		carData.stateStr(state);
 
-		snprintf(outString, size, dashDisplays[view], carData.speed, state, str_v, str_i);
+		snprintf(outString, size, dashDisplays[view], round(carData.speed + 0.5), state, str_v, str_i);
 	} else if (view == tbat_tmotor_tinverter) {
 		// Battery temperature, Motor temperature, Motor driver temperature
 		// 3 digit int, 3 digit int, 3 digit int
-		snprintf(outString, size, dashDisplays[view], carData.tempBat, (int)(carData.tempMotor + 0.5), (int)(carData.tempInverter + 0.5));
+		snprintf(outString, size, dashDisplays[view], carData.tempBat, round(carData.tempMotor + 0.5), round(carData.tempInverter + 0.5));
 	} else if (view == charging_screen) {
 		
 	} else {
@@ -788,13 +788,16 @@ void parseRx(st_cmd_t* rxMsg) {
 		// carData.tempBat = map(rxMsg->pt_data[0], 0, 255, -100, 100);
 		carData.tempBat = ((int)rxMsg->pt_data[0]) - 100;
 		
-		
 		carData.tempMotor = ((float)((int)((uint16_t)rxMsg->pt_data[1] << 8 | rxMsg->pt_data[2])))/10.0;
 
-		carData.tempInverter = ((float)((int)((uint16_t)rxMsg->pt_data[3] << 8 | rxMsg->pt_data[4])))/10.0;;		
+		carData.tempInverter = ((float)((int)((uint16_t)rxMsg->pt_data[3] << 8 | rxMsg->pt_data[4])))/10.0;
 
+		carData.motorRPM = ((int)((uint16_t)rxMsg->pt_data[5] << 8 | rxMsg->pt_data[6]));
 
-
+		// 4.1:1 gearbox
+		// 20.5 in tires
+		// 1056 In/m = 1 mph
+		carData.speed = 4.1 * carData.motorRPM * 20.5 / 1056;
 	}
 }
 

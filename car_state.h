@@ -20,8 +20,8 @@ public:
     // A decimal value of 173 means 17.3 A (charging).
     float current = (float)0.0;
 
-
-    int speed = 0;
+    int motorRPM = 0;
+    float speed = 0;
     int tempBat = 0;
     // Signed integer, actual temperature (in °C) times 10 
     float tempMotor = (float)0.0;
