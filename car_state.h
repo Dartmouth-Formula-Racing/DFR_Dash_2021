@@ -1,8 +1,27 @@
 #ifndef CAR_STATE_H
 #define CAR_STATE_H
 
-typedef enum cvc_state_e {PRECHARGE, DRIVE, NEUTRAL, REVERSE} cvc_state;
-typedef enum cvc_fault_e {CVC_OK, CVC_WARNING, CVC_RST_FAULT, CVC_HARD_FAULT} cvc_fault;
+typedef enum cvc_state_e
+{
+	CVC_ERROR,
+	GLV_FAULT,
+	READY,
+	PRECHARGE,
+	BUZZER,
+	DRIVE,
+	NEUTRAL,
+	REVERSE,
+	CHARGING,
+	CHARGE_ERROR,
+	CHARGE_DONE
+} cvc_state;
+typedef enum cvc_fault_e 
+{
+    CVC_OK,
+    CVC_WARNING,
+    CVC_RST_FAULT,
+    CVC_HARD_FAULT
+} cvc_fault;
 
 class Car_Data {
 public:
