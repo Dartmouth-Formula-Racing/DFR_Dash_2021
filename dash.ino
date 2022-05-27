@@ -794,10 +794,10 @@ void parseRx(st_cmd_t* rxMsg) {
 
 		carData.motorRPM = ((int)((uint16_t)rxMsg->pt_data[5] << 8 | rxMsg->pt_data[6]));
 
-		// 4.1:1 gearbox
+		// 4.4:1 gearbox
 		// 20.5 in tires
 		// 1056 In/m = 1 mph
-		carData.speed = 4.1 * carData.motorRPM * 20.5 / 1056;
+		carData.speed = 4.4 * carData.motorRPM * 20.5 / 1056;
 	}
 }
 
